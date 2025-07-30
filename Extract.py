@@ -43,8 +43,8 @@ class App:
     def __init__(self, root):
         """Initializes the Tkinter application."""
         self.root = root
-        self.root.title("RPA Process Monitor")
-        self.root.geometry("900x600")
+        self.root.title("MONITOR DE PROCESSOS (PFEP)")
+        self.root.geometry("700x600")
 
         # --- Configure style and fonts ---
         self.default_font = font.nametofont("TkDefaultFont")
@@ -56,7 +56,7 @@ class App:
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         # --- Create Log display widget ---
-        log_label = tk.Label(main_frame, text="Process Log", font=("Segoe UI", 12, "bold"))
+        log_label = tk.Label(main_frame, text="LOG DE PROCESSOS (PFEP)", font=("Segoe UI", 12, "bold"))
         log_label.pack(fill=tk.X, pady=(0, 5))
         
         self.log_widget = scrolledtext.ScrolledText(main_frame, state='disabled', wrap=tk.WORD, bg="#2b2b2b", fg="#cccccc", font=("Consolas", 10))
@@ -155,7 +155,7 @@ def download_standard_report(report_id, new_filename_base, driver_path, reports_
     edge_options.add_experimental_option("prefs", prefs)
     edge_options.add_argument("--inprivate")
     edge_options.add_argument("--log-level=3")
-    # edge_options.add_argument("--headless") # Optional: Run browser in background
+    edge_options.add_argument("--headless") # Optional: Run browser in background
     authenticated_url = f"https://{credentials['Usuario']}:{credentials['Senha']}@{BASE_URL}"
     service = webdriver.edge.service.Service(driver_path)
     driver = webdriver.Edge(service=service, options=edge_options)
@@ -208,7 +208,7 @@ def process_report_29(new_filename_base, driver_path, reports_path, credentials,
     edge_options.add_experimental_option("prefs", prefs)
     edge_options.add_argument("--log-level=3")
     edge_options.add_argument("--inprivate")
-    # edge_options.add_argument("--headless") # Optional: Run browser in background
+    edge_options.add_argument("--headless") # Optional: Run browser in background
     
     # Using the correct URL for Report 29
     authenticated_url = f"https://{credentials['Usuario']}:{credentials['Senha']}@{BASE_URL_RELATORIO_29}"
@@ -233,7 +233,7 @@ def process_report_29(new_filename_base, driver_path, reports_path, credentials,
                 try:
                     Select(wait.until(EC.element_to_be_clickable((By.ID, "MainContent_ddlModel")))).select_by_visible_text(model_text)
                     driver.find_element(By.ID, "MainContent_cmdConfirm").click()
-                    
+                    wait.until(EC.text_to_be_present_in_element((By.ID, "MainContent_lblMessage"), "Elaboration correctly executed"))
                     message_element = wait.until(EC.presence_of_element_located((By.ID, "MainContent_lblMessage")))
                     message_text = message_element.text
                     match = re.search(r'\d{7,}', message_text)
@@ -411,7 +411,7 @@ def process_report_61(new_filename_base, driver_path, reports_path, credentials,
     edge_options.add_experimental_option("prefs", prefs)
     edge_options.add_argument("--log-level=3")
     edge_options.add_argument("--inprivate")
-    # edge_options.add_argument("--headless") # Optional: Run browser in background
+    edge_options.add_argument("--headless") # Optional: Run browser in background
     
     authenticated_url = f"https://{credentials['Usuario']}:{credentials['Senha']}@{BASE_URL_RELATORIO_61}"
     service = webdriver.edge.service.Service(driver_path)
@@ -433,10 +433,12 @@ def process_report_61(new_filename_base, driver_path, reports_path, credentials,
                 try:
                     Select(wait.until(EC.element_to_be_clickable((By.ID, "MainContent_ddlModel")))).select_by_visible_text(model_text)
                     driver.find_element(By.ID, "MainContent_cmdConfirm").click()
-                    
+                    # time.sleep(2)
+                    wait.until(EC.text_to_be_present_in_element((By.ID, "MainContent_lblMessage"), "Elaboration correctly executed"))
                     message_element = wait.until(EC.presence_of_element_located((By.ID, "MainContent_lblMessage")))
                     message_text = message_element.text
                     match = re.search(r'\d{7,}', message_text)
+
                     if match:
                         activity_id = match.group(0)
                         activity_to_model_map[activity_id] = model_name
@@ -654,8 +656,8 @@ def Create_Compare_Table(reports_path):
         phase_out_keys = pfep_keys - todos_keys
         phase_out_df = pfep_df[pfep_df['Chave'].isin(phase_out_keys)].copy()
         phase_out_df.rename(columns={'Modelo': 'Model', 'Part Number': 'PFEP # RTM'}, inplace=True)
-        phase_out_df = phase_out_df[['Model', 'PFEP # RTM', 'Chave']]
-
+        phase_out_df = phase_out_df[['Model', 'PFEP # RTM', 'Chave']].drop_duplicates()
+        
         max_len = max(len(phase_in_df), len(phase_out_df))
         empty_cols = pd.DataFrame([['', '']] * max_len, columns=['x', ''])
         
@@ -735,7 +737,7 @@ def main_script_logic():
 
     print("\n--- ✨ Full process completed. ---")
 
-    
+
 
 # ====================================================================================
 # --- APPLICATION ENTRY POINT ---
