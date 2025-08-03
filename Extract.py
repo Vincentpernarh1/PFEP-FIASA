@@ -670,7 +670,9 @@ def Create_Compare_Table(reports_path):
             phase_out_df = pd.concat([phase_out_df, padding], ignore_index=True)
             
         final_df = pd.concat([phase_in_df, empty_cols, phase_out_df], axis=1)
-        
+
+       
+         
         output_path = os.path.join(reports_path, "Todos Comparativos.xlsx")
         final_df.to_excel(output_path, index=False)
         print(f"✅ File created: {output_path}")
@@ -707,12 +709,12 @@ def main_script_logic():
     all_threads = []
     for report_id, report_name in REPORTS_TO_DOWNLOAD:
         thread = None
-        if report_id == "61":
-            thread = threading.Thread(target=process_report_61, args=(report_name, driver_path, reports_path, credentials, base_path), name=f"Report-{report_id}")
-        elif report_id == "29":
-            thread = threading.Thread(target=process_report_29, args=(report_name, driver_path, reports_path, credentials, base_path), name=f"Report-{report_id}")
-        elif report_id == "32":
-            thread = threading.Thread(target=download_standard_report, args=(report_id, report_name, driver_path, reports_path, credentials), name=f"Report-{report_id}")
+        # if report_id == "61":
+        #     thread = threading.Thread(target=process_report_61, args=(report_name, driver_path, reports_path, credentials, base_path), name=f"Report-{report_id}")
+        # elif report_id == "29":
+        #     thread = threading.Thread(target=process_report_29, args=(report_name, driver_path, reports_path, credentials, base_path), name=f"Report-{report_id}")
+        # elif report_id == "32":
+        #     thread = threading.Thread(target=download_standard_report, args=(report_id, report_name, driver_path, reports_path, credentials), name=f"Report-{report_id}")
         
         if thread:
             all_threads.append(thread)
@@ -725,13 +727,13 @@ def main_script_logic():
     print("\n--- ✅ All download tasks have finished. ---")
     print("\n--- 🔄 Starting Post-Processing ---")
     
-    merge_models_61(reports_path, base_path)
-    process_merged_report_61(reports_path)
+    # merge_models_61(reports_path, base_path)
+    # process_merged_report_61(reports_path)
     
-    merge_models_29(reports_path, base_path)
-    process_merged_report_29(reports_path)
+    # merge_models_29(reports_path, base_path)
+    # process_merged_report_29(reports_path)
     
-    process_other_reports(reports_path)
+    # process_other_reports(reports_path)
     
     Create_Compare_Table(reports_path)
 
