@@ -20,6 +20,16 @@ from datetime import date
 from dateutil.relativedelta import relativedelta
 from concurrent.futures import ThreadPoolExecutor
 import re
+from playwright import sync_api
+import json
+import time
+import pandas as pd
+import os
+import json
+import time
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+
+# from Corrigir_Pesos import E_PER 
 
 # ====================================================================================
 # --- GUI IMPLEMENTATION ---
@@ -613,7 +623,9 @@ def process_other_reports(main_reports_path):
     if not found_any:
         print("No reports for 'Outros_relatorios' were found to process.")
 
-def Create_Compare_Table(reports_path):
+
+
+def Create_Compare_Table(reports_path,credentials):
     try:
         print("\n--- Running Create_Compare_Table ---")
         pfep_path = os.path.join(reports_path, "PFEP - Dados.xlsx")
@@ -628,6 +640,7 @@ def Create_Compare_Table(reports_path):
                 return
 
         pfep_df = pd.read_excel(pfep_path, dtype=str, header=9)
+        pfep_df_update = pd.read_excel(pfep_path, dtype=str, header=9)
         pfep_df['Part Number'] = pfep_df['Part Number'].str.strip().str.lower()
         pfep_df['Modelo'] = pfep_df['Modelo'].str.strip().str.lower()
         pfep_df['Chave'] = pfep_df['Part Number'] + "_" + pfep_df['Modelo']
@@ -652,6 +665,9 @@ def Create_Compare_Table(reports_path):
         
         phase_in_df.rename(columns={'Modelo': 'Model', 'PartNumber': 'RTM # PFEP', 'vcCodeParent': 'MATRICULA', 'fQty': 'fQty', 'nidElementTypeParent': 'Tipo'}, inplace=True)
         phase_in_df = phase_in_df[['Model', 'RTM # PFEP', 'Descrição', 'MATRICULA', 'fQty', 'Tipo', 'Peso']]
+        # *** NEW STEP: Update weights before final concatenation ***
+        phase_in_df = update_weights(phase_in_df, pfep_df_update,credentials)
+
 
         phase_out_keys = pfep_keys - todos_keys
         phase_out_df = pfep_df[pfep_df['Chave'].isin(phase_out_keys)].copy()
@@ -670,15 +686,188 @@ def Create_Compare_Table(reports_path):
             phase_out_df = pd.concat([phase_out_df, padding], ignore_index=True)
             
         final_df = pd.concat([phase_in_df, empty_cols, phase_out_df], axis=1)
+         # --- START: New logic as per your request ---
 
+        # Convert 'Peso' column to a numeric type to allow for proper comparison.
+        # Errors will be converted to NaN (Not a Number), which won't match the condition.
+        phase_in_df['Peso'] = pd.to_numeric(phase_in_df['Peso'], errors='coerce')
+
+        # 1. Filter phase_in_df for rows where 'Peso' is 1.
+        todos_peso_a_corrigir = phase_in_df[phase_in_df['Peso'] == 1].copy()
+
+        # 2. Create a new DataFrame from the filtered one, dropping duplicates based on the 'Descrição' column.
+        correcao_unico_por_desc = todos_peso_a_corrigir.drop_duplicates(subset=['MATRICULA']).copy()
+
+        # 3. Save the DataFrames to a single Excel file, each on its own sheet.
+        output_path = os.path.join(reports_path, "Todos Comparativos.xlsx")
+        with pd.ExcelWriter(output_path) as writer:
+            final_df.to_excel(writer, sheet_name='Comparativo', index=False)
+            todos_peso_a_corrigir.to_excel(writer, sheet_name='todos_peso_a_corrigir', index=False)
+            correcao_unico_por_desc.to_excel(writer, sheet_name='correcao unico por desc', index=False)
+        
+        print(f"✅ File with multiple sheets created: {output_path}")
+        # --- END: New logic ---
        
          
-        output_path = os.path.join(reports_path, "Todos Comparativos.xlsx")
-        final_df.to_excel(output_path, index=False)
-        print(f"✅ File created: {output_path}")
+        # output_path = os.path.join(reports_path, "Todos Comparativos.xlsx")
+        # final_df.to_excel(output_path, index=False)
+        # print(f"✅ File created: {output_path}")
 
     except Exception as e:
         print(f"❌ ERROR in Create_Compare_Table: {e}")
+
+
+def update_weights(phase_in_df, pfep_df,credentials):
+    
+    print("\n--- Running update_weights ---")
+    
+    # Ensure a clean copy to avoid SettingWithCopyWarning
+    updated_phase_in_df = phase_in_df.copy()
+    
+    # Prepare the PFEP data for efficient lookup
+    pfep_lookup_df = pfep_df[['Part Number', 'Descricao PN', 'Peso unitario PN (kg)']].copy()
+    pfep_lookup_df.rename(columns={
+        'Part Number': 'pfep_pn',
+        'Descricao PN': 'pfep_desc',
+        'Peso unitario PN (kg)': 'pfep_peso'
+    }, inplace=True)
+
+    # Clean up strings for reliable matching
+    pfep_lookup_df['pfep_pn'] = pfep_lookup_df['pfep_pn'].str.strip().str.lower()
+    pfep_lookup_df['pfep_desc'] = pfep_lookup_df['pfep_desc'].str.strip().str.lower()
+    
+    # Convert weight column to numeric, coercing errors to NaN
+    pfep_lookup_df['pfep_peso'] = pd.to_numeric(pfep_lookup_df['pfep_peso'], errors='coerce')
+    
+    # Create dictionaries for quick lookups
+    pn_to_weight = pfep_lookup_df.dropna(subset=['pfep_pn', 'pfep_peso']).set_index('pfep_pn')['pfep_peso'].to_dict()
+    desc_to_weight = pfep_lookup_df.dropna(subset=['pfep_desc', 'pfep_peso']).set_index('pfep_desc')['pfep_peso'].to_dict()
+
+    # Convert 'Peso' in the target df to numeric
+    updated_phase_in_df['Peso'] = pd.to_numeric(updated_phase_in_df['Peso'], errors='coerce').fillna(1.0)
+
+    rows_to_check = updated_phase_in_df[updated_phase_in_df['Peso'] == 1.0]
+    print(f"Found {len(rows_to_check)} rows with weight=1 to check against PFEP data.")
+
+    for index, row in rows_to_check.iterrows():
+        rtm_pn = str(row['RTM # PFEP']).strip().lower()
+        descricao = str(row['Descrição']).strip().lower()
+        new_weight = None
+
+        # 1. Check by Part Number
+        if rtm_pn in pn_to_weight:
+            new_weight = pn_to_weight[rtm_pn]
+
+        # 2. If not found, check by Description
+        elif descricao in desc_to_weight:
+            new_weight = desc_to_weight[descricao]
+
+        # 3. Update DataFrame if a new valid weight was found
+        if new_weight is not None and new_weight != 1.0:
+            updated_phase_in_df.loc[index, 'Peso'] = new_weight
+            print(f"  - Updated PN {row['RTM # PFEP']} weight to {new_weight}")
+
+    # Identify parts that still have weight=1 for scraping
+    pns_for_scraping = updated_phase_in_df[updated_phase_in_df['Peso'] == 1.0]['RTM # PFEP'].unique().tolist()
+    
+    # Call the scraping function
+    scraped_results = E_PER(pns_for_scraping,credentials)
+
+    # Update weights based on scraping results
+    if scraped_results:
+        for pn, weight in scraped_results.items():
+            # Find all rows with this PN and update their weight
+            updated_phase_in_df.loc[updated_phase_in_df['RTM # PFEP'] == pn, 'Peso'] = weight
+            print(f"  - Updated PN {pn} with scraped weight {weight}")
+            
+    print("--- Weight update process complete ---")
+    return updated_phase_in_df
+
+
+
+def E_PER(pns_for_scraping, credentials):
+   
+    print("\n--- Sending PNs to E_PER for web scraping ---")
+    if not pns_for_scraping:
+        print("No part numbers needed for scraping.")
+        return {}
+
+    print(f"Found {len(pns_for_scraping)} part numbers with weight 1 to check:")
+    for pn in pns_for_scraping:
+        print(f"  - {pn}")
+
+    username = credentials["Usuario"]
+    password = credentials["Senha"]
+    scraped_weights = {}
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False) # Use headless=True for background execution
+        page = browser.new_page()
+        
+        try:
+            # --- Login ---
+            print("Logging into E-PER...")
+            page.goto("https://eper-ltm.parts.fiat.com/navi?EU=1&eperLogin=0&sso=false&COUNTRY=076&RMODE=DEFAULT&SEARCH_TYPE=codpart&KEY=HOME")
+            page.fill("input[name='username']", username)
+            page.fill("input[name='password']", password)
+            page.select_option("select[name='loginType']", "Fiat AUTO/MyUser/Link.e.entry")
+            page.click("input[type='button']")
+            page.wait_for_load_state("networkidle", timeout=60000) # Wait for login to complete
+            print("Login successful.")
+
+            pns_for_scraping.append("77994840")
+            
+            # --- Loop through each Part Number ---
+            for pn in pns_for_scraping:
+                weight_found = False
+                print(f"\nSearching for PN: {pn}...")
+                try:
+                    # Navigate to the search page and enter the part number
+                    page.fill("input[id='fPNumber']", pn)
+                    page.keyboard.press("Enter")
+                    
+                    # Wait for the results to load
+                    page.wait_for_load_state("networkidle", timeout=50000)
+                    time.sleep(2)
+
+                    labels = page.locator("td.part_details_label")
+                    values = page.locator("td.part_details_value")
+
+                    for i in range(labels.count()):
+
+                        label_text = labels.nth(i).inner_text().strip()
+
+                        if "Peso em gramas:" in label_text:
+                            peso_value = values.nth(i).inner_text().strip()
+                            # print("Peso em gramas:", peso_value)
+                            peso_kg = float(peso_value.replace(',', '.')) / 1000
+                            scraped_weights[pn] = peso_kg
+                            print(f"  ✅ Weight found for {pn}: {peso_value} g -> {peso_kg} kg")
+
+                        else :
+                            continue  
+                        print(f"  ⚠️ Label 'Peso em gramas:' not found in the details for PN: {pn}")  
+                        weight_found = True
+                        break
+                
+                    
+                except PlaywrightTimeoutError:
+                    print(f"  ❌ Timeout error while searching for PN: {pn}. It might not exist or the page took too long to load.")
+                except Exception as e:
+                    print(f"  ❌ An unexpected error occurred for PN {pn}: {e}")
+                
+                # A short delay to prevent overwhelming the server
+                time.sleep(1)
+
+        except Exception as e:
+            print(f"❌ A critical error occurred during the Playwright session: {e}")
+        finally:
+            print("\n--- E_PER scraping complete ---")
+            browser.close()
+            
+    return scraped_weights
+
+
 
 def main_script_logic():
     """Main function to run the entire RPA process."""
@@ -735,10 +924,9 @@ def main_script_logic():
     
     # process_other_reports(reports_path)
     
-    Create_Compare_Table(reports_path)
+    Create_Compare_Table(reports_path,credentials)
 
     print("\n--- ✨ Full process completed. ---")
-
 
 
 # ====================================================================================
