@@ -18,6 +18,10 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.edge.options import Options as EdgeOptions
 from datetime import date
 from dateutil.relativedelta import relativedelta
+
+Chrome_driver_path = None  # global declaration
+
+
 from concurrent.futures import ThreadPoolExecutor
 import re
 from playwright import sync_api
@@ -781,39 +785,6 @@ def update_weights(phase_in_df, pfep_df,credentials):
 
 def E_PER(pns_for_scraping, credentials):
    
-    # 💡 Check if Chromium is installed in the default Playwright path
-    def is_chromium_installed():
-        local_appdata = os.getenv("LOCALAPPDATA")
-        browser_dir = Path(local_appdata) / "ms-playwright"
-        if browser_dir.exists():
-            for folder in browser_dir.iterdir():
-                if "chromium" in folder.name.lower():
-                    return True
-        return False
-
-    # ✅ Install Chromium if not found
-    if not is_chromium_installed():
-        print("🔄 Chromium not found. Installing...")
-        try:
-            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
-            print("✅ Chromium installed.")
-        except Exception as e:
-            print(f"❌ Failed to install Chromium: {e}")
-            sys.exit(1)
-    else:
-        print("✅ Chromium already installed.")
-
-    # ✅ Ensure Playwright is installed
-    try:
-        from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-    except ImportError:
-        print("📦 Installing Playwright...")
-        subprocess.run([sys.executable, "-m", "pip", "install", "playwright"])
-        from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-
-
-
-
     print("\n--- 🚀 Starting E-PER Web Scraping ---")
     if not pns_for_scraping:
         print("No part numbers provided.")
@@ -832,8 +803,8 @@ def E_PER(pns_for_scraping, credentials):
     try:
         with sync_playwright() as p:
             # ✅ Use fixed Chromium path
-            local_appdata = os.getenv("LOCALAPPDATA")
-            chromium_exe = Path(local_appdata) / "ms-playwright" / "chromium-1181" / "chrome-win" / "chrome.exe"
+            global  Chrome_driver_path
+            chromium_exe =  Chrome_driver_path
 
             if not chromium_exe.exists():
                 raise FileNotFoundError(f"❌ Chromium not found at: {chromium_exe}")
@@ -905,10 +876,13 @@ def E_PER(pns_for_scraping, credentials):
 
 def main_script_logic():
     """Main function to run the entire RPA process."""
+    global Chrome_driver_path
     try:
         base_path = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
         driver_path = os.path.join(base_path, DRIVER_FOLDER_NAME, DRIVER_NAME)
+        Chrome_driver_path = Path(base_path) / DRIVER_FOLDER_NAME / "chrome-win" / "chrome.exe"
         reports_path = os.path.join(base_path, REPORTS_FOLDER_NAME)
+
     except Exception as e:
         print(f"FATAL: Could not determine script paths. Error: {e}")
         return
